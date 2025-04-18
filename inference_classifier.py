@@ -1,11 +1,15 @@
-import pickle
 import cv2
 import mediapipe as mp
 import numpy as np
+import tensorflow as tf
 
-# Load the trained model
-model_dict = pickle.load(open('./model.p', 'rb'))
-model = model_dict['model']
+# Load the TFLite model
+interpreter = tf.lite.Interpreter(model_path="asl_model.tflite")
+interpreter.allocate_tensors()
+
+# Get input and output details
+input_details = interpreter.get_input_details()
+output_details = interpreter.get_output_details()
 
 # Initialize webcam
 cap = cv2.VideoCapture(0)
@@ -14,9 +18,9 @@ cap = cv2.VideoCapture(0)
 mp_hands = mp.solutions.hands
 mp_drawing = mp.solutions.drawing_utils
 mp_drawing_styles = mp.solutions.drawing_styles
-hands = mp_hands.Hands(static_image_mode=True, min_detection_confidence=0.3)
+hands = mp_hands.Hands(static_image_mode=True, min_detection_confidence=0.9)
 
-# Label map — ensure it matches your training labels
+# Label map — same as before
 labels_dict = {0: 'A', 1: 'E', 2: 'I', 3: 'O', 4: 'U'}
 
 while True:
@@ -62,15 +66,20 @@ while True:
             x2 = int(max(x_) * W) + 10
             y2 = int(max(y_) * H) + 10
 
-            # Make prediction
-            try:
-                # Get probabilities for each class
-                probas = model.predict_proba([np.asarray(data_aux)])
-                confidence = np.max(probas)
-                predicted_index = np.argmax(probas)
+            # Prepare input for TFLite model
+            input_data = np.array([data_aux], dtype=np.float32)
 
-                # Only accept gestures with high confidence (>= 90%)
-                if confidence >= 0.7:
+            try:
+                # Set tensor
+                interpreter.set_tensor(input_details[0]['index'], input_data)
+                interpreter.invoke()
+
+                # Get prediction
+                output_data = interpreter.get_tensor(output_details[0]['index'])[0]  # batch size 1
+                predicted_index = np.argmax(output_data)
+                confidence = np.max(output_data)
+
+                if confidence >= 0.8:
                     predicted_character = labels_dict.get(predicted_index, "Gesture incorrect")
                     print(f"Predicted Gesture: {predicted_character} ({confidence*100:.2f}%)")
                 else:
@@ -86,6 +95,7 @@ while True:
                 print("Prediction error:", e)
                 cv2.putText(frame, "Gesture incorrect", (30, 50),
                             cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 255), 3, cv2.LINE_AA)
+
     else:
         print("No hand detected.")
         cv2.putText(frame, "No hand detected", (30, 50),
