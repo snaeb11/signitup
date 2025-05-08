@@ -1,66 +1,48 @@
-# train_model.py
-
 import pickle
 import numpy as np
-import tensorflow as tf
-from tensorflow import keras
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense, Dropout
+
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder
-import joblib
+from sklearn.metrics import accuracy_score, classification_report
 
-# Load dataset
-with open('data.pickle', 'rb') as f:
-    data_dict = pickle.load(f)
+# Load the dataset
+data_dict = pickle.load(open('./data.pickle', 'rb'))
 
-EXPECTED_LENGTH = 42
-data = []
-labels = []
+# Clean inconsistent samples
+EXPECTED_LENGTH = 42  # 21 landmarks * 2 (x and y)
+cleaned_data = []
+cleaned_labels = []
 
 for d, l in zip(data_dict['data'], data_dict['labels']):
     if len(d) == EXPECTED_LENGTH:
-        data.append(d)
-        labels.append(l)
+        cleaned_data.append(d)
+        cleaned_labels.append(l)
+    else:
+        print(f"Skipping sample with length {len(d)}")
 
-data = np.array(data)
-labels = np.array(labels)
+data = np.asarray(cleaned_data)
+labels = np.asarray(cleaned_labels)
 
-# Encode labels
-le = LabelEncoder()
-labels_encoded = le.fit_transform(labels)
-labels_categorical = tf.keras.utils.to_categorical(labels_encoded)
+# Optional: check label distribution
+unique, counts = np.unique(labels, return_counts=True)
+print("Label distribution:", dict(zip(unique, counts)))
 
-# Save label encoder for Android decoding
-joblib.dump(le, 'label_encoder.pkl')
-
-# Split data
+# Split the data
 x_train, x_test, y_train, y_test = train_test_split(
-    data, labels_categorical, test_size=0.2, stratify=labels_encoded, random_state=42)
+    data, labels, test_size=0.2, shuffle=True, stratify=labels)
 
-# Define Keras model
-model = Sequential([
-    Dense(128, activation='relu', input_shape=(42,)),
-    Dropout(0.3),
-    Dense(64, activation='relu'),
-    Dense(labels_categorical.shape[1], activation='softmax')
-])
-
-model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
-
-# Train
-model.fit(x_train, y_train, validation_split=0.1, epochs=30, batch_size=16)
+# Train model
+model = RandomForestClassifier(n_estimators=100, random_state=42)
+model.fit(x_train, y_train)
 
 # Evaluate
-loss, accuracy = model.evaluate(x_test, y_test)
-print(f"Test Accuracy: {accuracy * 100:.2f}%")
+y_predict = model.predict(x_test)
+score = accuracy_score(y_predict, y_test)
+
+print('\n{}% of samples were classified correctly!'.format(score * 100))
+print("\nDetailed classification report:\n")
+print(classification_report(y_test, y_predict))
 
 # Save model
-model.save("asl_model.h5")
-
-# Convert to TFLite
-converter = tf.lite.TFLiteConverter.from_keras_model(model)
-tflite_model = converter.convert()
-
-with open("asl_model.tflite", "wb") as f:
-    f.write(tflite_model)
+with open('model.p', 'wb') as f:
+    pickle.dump({'model': model}, f)
